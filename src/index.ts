@@ -34,7 +34,7 @@ app.post('/transcript-audio', async (req, res) => {
     }
 })
 
-app.post('/generate-translation-and-md', async (req, res) => {
+app.post('/generate-md', async (req, res) => {
     try {
         await generateMarkDownFile(textDir);
         res.send('🎉 Translation concluded.');

@@ -15,7 +15,6 @@ function extractAudioFromVideo(videoFilePath: string, outputFilePath: string): P
             if (err) {
                 return reject(err);
             }
-            const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
 
 
             ffm.ffprobe(videoFilePath, (err, metadata) => {
@@ -23,6 +22,7 @@ function extractAudioFromVideo(videoFilePath: string, outputFilePath: string): P
                     return reject(err);
                 }
                 const durationSec = metadata.format.duration?.toFixed(2) || '0';
+                const fileSizeMB = (Number.parseInt(metadata.format.size?.toFixed(2)!)/ (1024 * 1024));
 
                 ffm(videoFilePath)
                     .outputFormat('mp3')

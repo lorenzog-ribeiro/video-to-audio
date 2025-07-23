@@ -24,6 +24,7 @@
     "form-data": "^4.0.4",
     "fs": "0.0.1-security",
     "lamejs": "^1.2.1",
+    "mammoth": "^1.9.1",
     "openai": "^5.10.1"
   }
 }
