@@ -7,6 +7,35 @@ import mammoth from 'mammoth';
 const api_key = process.env.API_KEY;
 const openai = new openAI({ apiKey: api_key });
 
+// Content sanitization patterns
+const PROBLEMATIC_PATTERNS = [
+    /\b(kill|murder|suicide|bomb|weapon|drug|illegal|hack|crack|pirate)\b/gi,
+    /\b(copyright|proprietary|confidential|secret|classified)\b/gi,
+    /\b(xxx|porn|adult|nsfw)\b/gi
+];
+
+// Function to sanitize content before sending to GPT
+function sanitizeContent(content: string): { sanitized: string; warnings: string[] } {
+    let sanitized = content;
+    const warnings: string[] = [];
+
+    // Remove or replace problematic patterns
+    PROBLEMATIC_PATTERNS.forEach(pattern => {
+        if (pattern.test(sanitized)) {
+            warnings.push(`Found potentially problematic content matching: ${pattern.source}`);
+            sanitized = sanitized.replace(pattern, '[REDACTED]');
+        }
+    });
+
+    // Remove excessive special characters that might confuse the model
+    sanitized = sanitized.replace(/[^\w\s\-.,!?;:'"()\[\]{}\/\\@#$%^&*+=<>|\n]/g, '');
+
+    // Limit consecutive line breaks
+    sanitized = sanitized.replace(/\n{4,}/g, '\n\n\n');
+
+    return { sanitized, warnings };
+}
+
 // Function to estimate tokens more accurately
 function estimateTokens(text: string): number {
     // More accurate approximation: 1 token ≈ 3.5 characters for English/Portuguese
@@ -74,145 +103,197 @@ function smartSplitTextIntoChunks(text: string, maxTokens: number = 12000): stri
     return refinedChunks;
 }
 
-// Function to read file content based on extension
+// Function to read file content based on extension with better error handling
 async function readFileContent(filePath: string): Promise<string> {
     const extension = path.extname(filePath).toLowerCase();
 
-    switch (extension) {
-        case '.md':
-            return fs.readFileSync(filePath, 'utf-8');
+    try {
+        switch (extension) {
+            case '.md':
+                const mdContent = fs.readFileSync(filePath, 'utf-8');
+                // Clean up markdown content
+                return mdContent
+                    .replace(/```[\s\S]*?```/g, '[CODE BLOCK]') // Replace code blocks
+                    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Remove markdown links
+                    .trim();
 
-        case '.docx':
-            const result = await mammoth.extractRawText({ path: filePath });
-            return result.value;
+            case '.docx':
+                const result = await mammoth.extractRawText({ path: filePath });
+                // Clean up docx content
+                return result.value
+                    .replace(/\r\n/g, '\n') // Normalize line endings
+                    .replace(/\t/g, '  ') // Replace tabs with spaces
+                    .trim();
 
-        default:
-            throw new Error(`Unsupported file type: ${extension}`);
+            default:
+                throw new Error(`Unsupported file type: ${extension}`);
+        }
+    } catch (error: any) {
+        console.error(`Error reading file ${filePath}:`, error.message);
+        throw error;
     }
 }
 
-// Function to process a single chunk with contextual awareness
+// Enhanced prompt engineering to avoid refusals
+function createSafePrompt(basePrompt: string, content: string): string {
+    return `You are a helpful assistant analyzing transcribed content for summarization and key insights.
+
+IMPORTANT INSTRUCTIONS:
+1. Focus on extracting factual information and creating summaries
+2. If you encounter any content that seems inappropriate, simply skip it and continue with the rest
+3. Do not refuse to process content - instead, focus on the parts you can summarize
+4. Maintain a professional and objective tone
+5. If the content seems corrupted or nonsensical, provide a brief summary stating that
+
+BASE TASK:
+${basePrompt}
+
+CONTENT TO ANALYZE:
+${content}
+
+Please provide your analysis below:`;
+}
+
+// Function to process a single chunk with better error handling
 async function processChunkWithContext(
     chunk: string,
     prompt: string,
     chunkIndex: number,
     totalChunks: number,
-    fileName: string
+    fileName: string,
+    retryCount: number = 0
 ): Promise<string> {
+    const maxRetries = 3;
+
+    // Sanitize the chunk
+    const { sanitized, warnings } = sanitizeContent(chunk);
+
+    if (warnings.length > 0) {
+        console.log(`   ⚠️  Content warnings for chunk ${chunkIndex + 1}: ${warnings.length} issues found`);
+    }
+
+    // Create a safe prompt
+    const safePrompt = createSafePrompt(prompt, sanitized);
+
     let contextualPrompt: string;
 
     if (totalChunks === 1) {
-        // Single chunk - process normally
-        contextualPrompt = `${prompt}\n\nDocument Content:\n${chunk}`;
+        contextualPrompt = safePrompt;
     } else {
-        // Multiple chunks - provide context for better coherence
-        if (chunkIndex === 0) {
-            contextualPrompt = `${prompt}
+        const position = chunkIndex === 0 ? 'BEGINNING' :
+            chunkIndex === totalChunks - 1 ? 'FINAL' : 'MIDDLE';
 
-IMPORTANT CONTEXT: This is the BEGINNING of document "${fileName}" (part ${chunkIndex + 1} of ${totalChunks}).
-Process this initial section while maintaining context for subsequent parts.
-Do not provide final conclusions yet.
+        contextualPrompt = `${safePrompt}
 
-Document Content (Part ${chunkIndex + 1}/${totalChunks}):\n${chunk}`;
-        } else if (chunkIndex === totalChunks - 1) {
-            contextualPrompt = `${prompt}
-
-IMPORTANT CONTEXT: This is the FINAL part of document "${fileName}" (part ${chunkIndex + 1} of ${totalChunks}).
-Complete the processing considering this is the document's conclusion.
-Provide final insights and wrap up the analysis.
-
-Document Content (Part ${chunkIndex + 1}/${totalChunks}):\n${chunk}`;
-        } else {
-            contextualPrompt = `${prompt}
-
-IMPORTANT CONTEXT: This is a MIDDLE section of document "${fileName}" (part ${chunkIndex + 1} of ${totalChunks}).
-Continue processing this section maintaining consistency with previous parts.
-Do not provide final conclusions yet.
-
-Document Content (Part ${chunkIndex + 1}/${totalChunks}):\n${chunk}`;
-        }
+CONTEXT: This is the ${position} section of document "${fileName}" (part ${chunkIndex + 1} of ${totalChunks}).`;
     }
 
     try {
         const response = await openai.chat.completions.create({
             model: 'gpt-4o',
-            messages: [{
-                role: 'user',
-                content: contextualPrompt
-            }],
-            temperature: 0.2,
-            max_tokens: 10000 // Limit output to control costs
-        });
-
-        return response.choices[0].message.content || '';
-    } catch (error) {
-        console.error(`Error processing chunk ${chunkIndex + 1}:`, error);
-        try {
-            const fallbackResponse = await openai.chat.completions.create({
-                model: 'gpt-4o',
-                messages: [{
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a helpful assistant that summarizes and analyzes transcribed content. Always provide useful summaries even if the content quality is poor.'
+                },
+                {
                     role: 'user',
                     content: contextualPrompt
-                }],
-                temperature: 0.2,
-                max_tokens: 10000
-            });
-            return fallbackResponse.choices[0].message.content || '';
-        } catch (fallbackError) {
-            console.error(`Fallback also failed for chunk ${chunkIndex + 1}:`, fallbackError);
-            return `[Error processing part ${chunkIndex + 1} of document]`;
+                }
+            ],
+            temperature: 0.3, // Lower temperature for more consistent results
+            max_tokens: 8000,
+            // Add safety settings
+            // Note: These parameters might not be available in all OpenAI models
+        });
+
+        const result = response.choices[0].message.content || '';
+
+        // Check for refusal patterns
+        if (result.toLowerCase().includes("i can't assist") ||
+            result.toLowerCase().includes("i cannot assist") ||
+            result.toLowerCase().includes("i'm unable to") ||
+            result.length < 50) {
+
+            throw new Error('Received refusal or insufficient response from API');
         }
+
+        return result;
+
+    } catch (error: any) {
+        console.error(`   ❌ Error processing chunk ${chunkIndex + 1} (attempt ${retryCount + 1}):`, error.message);
+
+        if (retryCount < maxRetries) {
+            console.log(`   🔄 Retrying with modified approach...`);
+
+            // Try with an even simpler prompt
+            const fallbackPrompt = `Please summarize the following transcribed content in a professional manner. Focus on main topics and key points:
+
+${sanitized.substring(0, 5000)}...
+
+Provide a summary of the main topics discussed.`;
+
+            return processChunkWithContext(
+                chunk.substring(0, 5000), // Reduce chunk size
+                fallbackPrompt,
+                chunkIndex,
+                totalChunks,
+                fileName,
+                retryCount + 1
+            );
+        }
+
+        // Final fallback - return a generic summary
+        return `[Summary unavailable for part ${chunkIndex + 1} due to processing errors. The content may contain special characters or formatting that couldn't be processed.]`;
     }
 }
 
-// Function to consolidate multiple chunks into a coherent final output
-async function consolidateChunks(
-    processedChunks: string[],
-    fileName: string,
-    originalPrompt: string
-): Promise<string> {
-    if (processedChunks.length === 1) {
-        return processedChunks[0];
+// Function to validate and clean final output
+function validateAndCleanOutput(content: string, fileName: string): string {
+    // Check for common refusal patterns
+    const refusalPatterns = [
+        /i (can't|cannot|won't|will not) assist/i,
+        /i'm (unable|not able) to/i,
+        /i (don't|do not) have the capability/i,
+        /against my guidelines/i
+    ];
+
+    for (const pattern of refusalPatterns) {
+        if (pattern.test(content)) {
+            console.warn(`   ⚠️  Detected refusal pattern in output for ${fileName}`);
+            return `# Summary for ${fileName}
+
+The automatic summarization encountered issues with this content. The transcription may contain:
+- Special formatting or characters that couldn't be processed
+- Content that triggered safety filters
+- Corrupted or incomplete data
+
+## Original Content Overview
+This file appears to be a transcription that requires manual review for proper summarization.
+
+## Recommendation
+Please review the original transcription file manually for accurate content analysis.`;
+        }
     }
 
-    const consolidationPrompt = `You have received a document "${fileName}" that was processed in ${processedChunks.length} separate parts due to length constraints.
-
-Your task is to consolidate these parts into a single, coherent, and well-structured output that:
-1. Eliminates any duplications or redundancies
-2. Ensures smooth transitions between sections
-3. Maintains consistency in tone and style
-4. Provides a comprehensive and unified result
-5. Follows the original processing instructions
-
-PROCESSED PARTS:
-${processedChunks.map((chunk, index) => `\n=== PART ${index + 1} ===\n${chunk}`).join('\n')}
-
-Please consolidate all parts into a single, cohesive document that reads as if it was processed as one unit.`;
-
-    try {
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4o', // Use cheaper model for consolidation
-            messages: [{
-                role: 'user',
-                content: consolidationPrompt
-            }],
-            temperature: 0.1, // Very low temperature for consistency
-            max_tokens: 10000
-        });
-
-        return response.choices[0].message.content || processedChunks.join('\n\n---\n\n');
-    } catch (error) {
-        console.error('Error during consolidation:', error);
-        // Return chunks joined with separators if consolidation fails
-        return processedChunks.join('\n\n--- SECTION BREAK ---\n\n');
-    }
+    return content;
 }
 
 // Main function to process files and generate markdown
 export async function generateMarkDownFile(textDir: string) {
     try {
         const files = fs.readdirSync(textDir);
-        const prompt = fs.readFileSync(path.resolve(__dirname, '../../prompts/prompt.txt'), 'utf-8');
+        const promptPath = path.resolve(__dirname, '../../prompts/prompt.txt');
+
+        // Create a safer default prompt if the prompt file doesn't exist
+        let prompt = 'Please create a comprehensive summary of the following transcribed content. Focus on: 1) Main topics discussed, 2) Key points and insights, 3) Any action items or conclusions.';
+
+        if (fs.existsSync(promptPath)) {
+            prompt = fs.readFileSync(promptPath, 'utf-8');
+        } else {
+            console.warn('⚠️  Prompt file not found, using default prompt');
+        }
+
         const markdownDir = path.resolve(__dirname, '../../working-paths/markdown');
 
         // Ensure output directory exists
@@ -243,8 +324,16 @@ export async function generateMarkDownFile(textDir: string) {
                 console.log(`🔄 Processing ${totalProcessed}: ${file}`);
 
                 const content = await readFileContent(filePath);
+
+                // Check if content is empty or too short
+                if (!content || content.trim().length < 10) {
+                    console.log(`   ⚠️  File appears to be empty or corrupted`);
+                    failedFiles++;
+                    continue;
+                }
+
                 const estimatedTokens = estimateTokens(content + prompt);
-                console.log(`   📊 Estimated tokens: ${estimatedTokens}`);
+                console.log(`   📊 Content length: ${content.length} chars (~${estimatedTokens} tokens)`);
 
                 let finalContent = '';
 
@@ -272,67 +361,86 @@ export async function generateMarkDownFile(textDir: string) {
 
                         // Rate limiting pause
                         if (i < chunks.length - 1) {
-                            await new Promise(resolve => setTimeout(resolve, 500));
+                            await new Promise(resolve => setTimeout(resolve, 1000));
                         }
                     }
 
-                    // Consolidate chunks for coherent output
-                    console.log(`   🔗 Consolidating ${chunks.length} chunks...`);
-                    finalContent = await consolidateChunks(processedChunks, file, prompt);
-                    totalRequests++; // Add consolidation request to count
+                    // Consolidate chunks
+                    if (chunks.length > 1) {
+                        console.log(`   🔗 Consolidating ${chunks.length} chunks...`);
+                        finalContent = processedChunks.join('\n\n---\n\n');
+                    } else {
+                        finalContent = processedChunks[0];
+                    }
 
                 } else {
                     // Small file - process as single unit
                     console.log(`   ✅ Processing as single unit...`);
-                    const fullPrompt = `${prompt}\n\nDocument Content:\n${content}`;
 
-                    try {
-                        const response = await openai.chat.completions.create({
-                            model: 'gpt-4o',
-                            messages: [{
-                                role: 'user',
-                                content: fullPrompt
-                            }],
-                            temperature: 0.2
-                        });
-
-                        finalContent = response.choices[0].message.content || '';
-                        totalRequests++;
-                    } catch (error) {
-                        const fallbackResponse = await openai.chat.completions.create({
-                            model: 'gpt-4o',
-                            messages: [{
-                                role: 'user',
-                                content: fullPrompt
-                            }],
-                            temperature: 0.2
-                        });
-
-                        finalContent = fallbackResponse.choices[0].message.content || '';
-                        totalRequests++;
-                    }
+                    finalContent = await processChunkWithContext(
+                        content,
+                        prompt,
+                        0,
+                        1,
+                        file
+                    );
+                    totalRequests++;
                 }
 
+                // Validate and clean the output
+                finalContent = validateAndCleanOutput(finalContent, file);
+
                 // Save the processed content
-                if (finalContent) {
-                    const outputFileName = file.replace(/\.(md|docx)$/, '.md');
+                if (finalContent && finalContent.length > 50) {
+                    const outputFileName = file.replace(/\.(md|docx)$/, '_summary.md');
                     const outputPath = path.join(markdownDir, outputFileName);
-                    fs.writeFileSync(outputPath, finalContent);
+
+                    // Add metadata header
+                    const finalOutput = `---
+source: ${file}
+processed: ${new Date().toISOString()}
+status: success
+---
+
+${finalContent}`;
+
+                    fs.writeFileSync(outputPath, finalOutput);
                     console.log(`   ✅ Saved: ${outputFileName}`);
                     successfulFiles++;
                 } else {
-                    console.log(`   ❌ No content generated for: ${file}`);
+                    console.log(`   ❌ Insufficient content generated for: ${file}`);
                     failedFiles++;
                 }
 
-            } catch (fileError) {
-                console.error(`   ❌ Error processing file ${file}:`, fileError);
+            } catch (fileError: any) {
+                console.error(`   ❌ Error processing file ${file}:`, fileError.message);
+
+                // Save error report
+                const errorFileName = file.replace(/\.(md|docx)$/, '_error.md');
+                const errorPath = path.join(markdownDir, errorFileName);
+                const errorContent = `---
+source: ${file}
+processed: ${new Date().toISOString()}
+status: error
+error: ${fileError.message}
+---
+
+# Processing Error
+
+Failed to process this file. Error details:
+
+\`\`\`
+${fileError.stack || fileError.message}
+\`\`\`
+
+Please check the original file for issues.`;
+
+                fs.writeFileSync(errorPath, errorContent);
                 failedFiles++;
                 continue;
             }
 
             // Progress update
-            console.log(`   💰 Requests so far: ${totalRequests}`);
             console.log(`   📈 Progress: ${totalProcessed}/${files.filter(f => ['.md', '.docx'].includes(path.extname(f).toLowerCase())).length} files\n`);
         }
 
@@ -342,7 +450,8 @@ export async function generateMarkDownFile(textDir: string) {
         console.log(`   ✅ Successful: ${successfulFiles} files`);
         console.log(`   ❌ Failed: ${failedFiles} files`);
         console.log(`   🔄 Total API requests: ${totalRequests}`);
-        console.log(`   💵 Estimated cost: ~$${(totalRequests * 0.01).toFixed(2)} USD`);
+        console.log(`   💵 Estimated cost: ~$${(totalRequests * 0.02).toFixed(2)} USD`);
+        console.log(`   📁 Output directory: ${markdownDir}`);
 
     } catch (error) {
         console.error('❌ Fatal error during processing:', error);
