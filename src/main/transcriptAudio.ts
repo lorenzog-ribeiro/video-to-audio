@@ -2,7 +2,7 @@ import fs from 'fs';
 import OpenAI from 'openai';
 import 'dotenv/config';
 import path from 'path';
-import { getAudioSize, splitAudioIntoChunks, cleanupTempFiles, getAudioDuration } from '../compressAudio';
+import { getAudioSize, splitAudioIntoChunks, cleanupTempFiles, getAudioDuration } from '../utils/compressAudio';
 
 const api_key = process.env.API_KEY;
 const openai = new OpenAI({ apiKey: api_key });

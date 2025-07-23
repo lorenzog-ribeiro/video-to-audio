@@ -141,23 +141,21 @@ Document Content (Part ${chunkIndex + 1}/${totalChunks}):\n${chunk}`;
                 content: contextualPrompt
             }],
             temperature: 0.2,
-            max_tokens: 4000 // Limit output to control costs
+            max_tokens: 10000 // Limit output to control costs
         });
 
         return response.choices[0].message.content || '';
     } catch (error) {
         console.error(`Error processing chunk ${chunkIndex + 1}:`, error);
-        // Fallback to GPT-3.5-turbo if GPT-4o fails
         try {
-            console.log(`Falling back to GPT-3.5-turbo for chunk ${chunkIndex + 1}...`);
             const fallbackResponse = await openai.chat.completions.create({
-                model: 'gpt-3.5-turbo-0125',
+                model: 'gpt-4o',
                 messages: [{
                     role: 'user',
                     content: contextualPrompt
                 }],
                 temperature: 0.2,
-                max_tokens: 4000
+                max_tokens: 10000
             });
             return fallbackResponse.choices[0].message.content || '';
         } catch (fallbackError) {
@@ -193,13 +191,13 @@ Please consolidate all parts into a single, cohesive document that reads as if i
 
     try {
         const response = await openai.chat.completions.create({
-            model: 'gpt-3.5-turbo-0125', // Use cheaper model for consolidation
+            model: 'gpt-4o', // Use cheaper model for consolidation
             messages: [{
                 role: 'user',
                 content: consolidationPrompt
             }],
             temperature: 0.1, // Very low temperature for consistency
-            max_tokens: 4000
+            max_tokens: 10000
         });
 
         return response.choices[0].message.content || processedChunks.join('\n\n---\n\n');
@@ -301,10 +299,8 @@ export async function generateMarkDownFile(textDir: string) {
                         finalContent = response.choices[0].message.content || '';
                         totalRequests++;
                     } catch (error) {
-                        // Fallback to GPT-3.5-turbo
-                        console.log(`   🔄 Falling back to GPT-3.5-turbo...`);
                         const fallbackResponse = await openai.chat.completions.create({
-                            model: 'gpt-3.5-turbo-0125',
+                            model: 'gpt-4o',
                             messages: [{
                                 role: 'user',
                                 content: fullPrompt

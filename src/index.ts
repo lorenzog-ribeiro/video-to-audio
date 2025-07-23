@@ -1,8 +1,8 @@
 import path from 'path';
 import express from 'express';
-import { processAllVideos } from './processVideos';
-import { transcriptMP3Audio } from './openaiServces/transcriptAudio';
-import { generateMarkDownFile } from './openaiServces/gptService';
+import { processAllVideos } from './utils/processVideos';
+import { transcriptMP3Audio } from './main/transcriptAudio';
+import { generateMarkDownFile } from './services/gptService';
 
 const app = express();
 const port = process.env.PORT || 3030;
@@ -43,15 +43,5 @@ app.post('/generate-md', async (req, res) => {
         res.status(500).json({ error: err.message, stack: err.stack });
     }
 })
-
-// app.post('/process-all-translations', async (req, res) => {
-//     try {
-//         await processAllTranscriptions();
-//         res.send('🎉 All Files processed.');
-//     } catch (err: any) {
-//         console.error('❌ Error to process the files:', err);
-//         res.status(500).json({ error: err.message, stack: err.stack });
-//     }
-// })
 
 app.use(express.json());
