@@ -124,12 +124,7 @@ export async function createPage(pageData: {
 }
 
 // Função para extrair metadados do arquivo markdown
-function extractMarkdownMetadata(content: string): {
-    title: string;
-    description: string;
-    tags: string[];
-    cleanContent: string;
-} {
+function extractMarkdownMetadata(content: string): { title: string; description: string; tags: string[]; cleanContent: string; } {
     let title = '';
     let description = '';
     let tags: string[] = [];
@@ -210,11 +205,7 @@ function generateWikiPath(title: string, basePath: string = ''): string {
 }
 
 // NOVA FUNÇÃO: Processar todos os arquivos markdown
-export async function processAllMarkdownFiles(markdownDir?: string): Promise<{
-    successful: number;
-    failed: number;
-    errors: Array<{ file: string; error: string }>;
-}> {
+export async function processAllMarkdownFiles(markdownDir?: string): Promise<{ successful: number; failed: number; errors: Array<{ file: string; error: string }>; }> {
     const results = {
         successful: 0,
         failed: 0,

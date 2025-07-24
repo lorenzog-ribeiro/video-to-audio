@@ -190,7 +190,7 @@ CONTEXT: This is the ${position} section of document "${fileName}" (part ${chunk
 
     try {
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o',
+            model: 'gpt-4.1-mini',
             messages: [
                 {
                     role: 'system',
@@ -450,7 +450,7 @@ Please check the original file for issues.`;
         console.log(`   ✅ Successful: ${successfulFiles} files`);
         console.log(`   ❌ Failed: ${failedFiles} files`);
         console.log(`   🔄 Total API requests: ${totalRequests}`);
-        console.log(`   💵 Estimated cost: ~$${(totalRequests * 0.02).toFixed(2)} USD`);
+        console.log(`   💵 Estimated cost: ~$${(totalRequests * 0.10).toFixed(2)} USD`);
         console.log(`   📁 Output directory: ${markdownDir}`);
 
     } catch (error) {

@@ -56,16 +56,4 @@ app.post('/insert-wikijs', async (req, res) => {
     }
 })
 
-// app.post('/test', async (req, res) => {
-//     try {
-//         await testWikiJSConnection();
-//         res.send('🎉 All testWikiJSConnection are ok on wikijs.');
-//     } catch (err: any) {
-//         console.error('❌ Error to insert the file on wiki js:', err);
-//         res.status(500).json({ error: err.message, stack: err.stack });
-//     }
-// })
-
-
-
 app.use(express.json());

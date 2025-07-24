@@ -1,123 +1,174 @@
-import fs from 'fs';
+// No arquivo utils/compressAudio.ts, modifique a função splitAudioIntoChunks:
+
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
+import fs from 'fs';
 
-const chunkMaxDuration = 600; // 10 minutes each chunk
-const TEMP_DIR = path.resolve(process.cwd(), '../working-paths/temp');
+export async function splitAudioIntoChunks(
+    audioPath: string,
+    numberOfChunks?: number
+): Promise<string[]> {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const audioDir = path.dirname(audioPath);
+            const audioName = path.basename(audioPath, path.extname(audioPath));
+            const audioExt = path.extname(audioPath);
 
-// Garante que o diretório temporário existe
-if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
-}
-
-export async function splitAudioIntoChunks(audioPath: string): Promise<string[]> {
-    const chunks: string[] = [];
-    const baseName = path.parse(audioPath).name;
-
-    console.log(`📂 Splitting audio: ${path.basename(audioPath)}`);
-
-    try {
-        const duration = await getAudioDuration(audioPath);
-        const numChunks = Math.ceil(duration / chunkMaxDuration);
-
-        console.log(`⏱️ Duration: ${Math.round(duration)}s | Chunks: ${numChunks}`);
-
-        for (let i = 0; i < numChunks; i++) {
-            const startTime = i * chunkMaxDuration;
-            // ❌ ERRO CORRIGIDO: Estava faltando ponto e vírgula
-            const chunkPath = generateFileTempChunk(baseName, `chunk_${i + 1}`);
-
-            console.log(`🔸 Creating chunk ${i + 1}/${numChunks} (${startTime}s - ${startTime + chunkMaxDuration}s)`);
-
-            await new Promise<void>((resolve, reject) => {
-                ffmpeg(audioPath)
-                    .seekInput(startTime)
-                    .duration(chunkMaxDuration)
-                    .audioBitrate(64)
-                    .audioChannels(1)
-                    .audioFrequency(16000)
-                    .outputFormat('mp3')
-                    .on('start', (commandLine) => {
-                        console.log(`   🎬 FFmpeg command: ${commandLine}`);
-                    })
-                    .on('progress', (progress) => {
-                        if (progress.percent) {
-                            process.stdout.write(`\r   ⏳ Progress chunk ${i + 1}: ${Math.round(progress.percent)}%`);
-                        }
-                    })
-                    .on('end', () => {
-                        chunks.push(chunkPath);
-                        const chunkSize = fs.existsSync(chunkPath) ? getAudioSize(chunkPath) : 0;
-                        console.log(`\n   ✅ Chunk ${i + 1}/${numChunks} created (${Math.round(chunkSize / 1024 / 1024)}MB)`);
-                        resolve();
-                    })
-                    .on('error', (err) => {
-                        console.error(`\n   ❌ Error creating chunk ${i + 1}: ${err.message}`);
-                        reject(err);
-                    })
-                    .save(chunkPath);
-            });
-        }
-
-        console.log(`✅ All ${numChunks} chunks created successfully`);
-        return chunks;
-
-    } catch (error) {
-        console.error(`❌ Error splitting audio ${audioPath}:`, error);
-        // Limpa chunks que podem ter sido criados parcialmente
-        chunks.forEach(chunk => {
-            if (fs.existsSync(chunk)) {
-                fs.unlinkSync(chunk);
-                console.log(`🗑️ Cleaned up partial chunk: ${path.basename(chunk)}`);
+            const tempDir = path.join(audioDir, 'temp_chunks');
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
             }
-        });
-        throw error;
-    }
+
+            // Obtém a duração total do áudio
+            const totalDuration = await getAudioDuration(audioPath);
+
+            // Se numberOfChunks não foi especificado, calcula baseado no tamanho do arquivo
+            let chunksToCreate: number;
+            if (numberOfChunks) {
+                chunksToCreate = numberOfChunks;
+            } else {
+                const fileSize = getAudioSize(audioPath);
+                const maxFileSize = 25 * 1024 * 1024; // 25MB
+                chunksToCreate = Math.ceil(fileSize / maxFileSize);
+            }
+
+            // Calcula a duração de cada chunk
+            const chunkDuration = totalDuration / chunksToCreate;
+
+            console.log(`   📐 Total duration: ${Math.round(totalDuration)}s`);
+            console.log(`   🔪 Creating ${chunksToCreate} chunks of ~${Math.round(chunkDuration)}s each`);
+
+            const chunkPromises: Promise<string>[] = [];
+            const chunkPaths: string[] = [];
+
+            for (let i = 0; i < chunksToCreate; i++) {
+                const startTime = i * chunkDuration;
+                const chunkPath = path.join(tempDir, `${audioName}_chunk_${i + 1}${audioExt}`);
+                chunkPaths.push(chunkPath);
+
+                const chunkPromise = new Promise<string>((resolveChunk, rejectChunk) => {
+                    let command = ffmpeg(audioPath)
+                        .seekInput(startTime)
+                        .duration(chunkDuration)
+                        .output(chunkPath)
+                        .audioCodec('copy') // Mantém o codec original para ser mais rápido
+                        .on('end', () => {
+                            console.log(`     ✅ Chunk ${i + 1}/${chunksToCreate} created`);
+                            resolveChunk(chunkPath);
+                        })
+                        .on('error', (err) => {
+                            console.error(`     ❌ Error creating chunk ${i + 1}:`, err.message);
+                            rejectChunk(err);
+                        });
+
+                    // Para o último chunk, não define duração (pega até o final)
+                    if (i === chunksToCreate - 1) {
+                        command = ffmpeg(audioPath)
+                            .seekInput(startTime)
+                            .output(chunkPath)
+                            .audioCodec('copy')
+                            .on('end', () => {
+                                console.log(`     ✅ Final chunk ${i + 1}/${chunksToCreate} created`);
+                                resolveChunk(chunkPath);
+                            })
+                            .on('error', (err) => {
+                                console.error(`     ❌ Error creating final chunk ${i + 1}:`, err.message);
+                                rejectChunk(err);
+                            });
+                    }
+
+                    command.run();
+                });
+
+                chunkPromises.push(chunkPromise);
+            }
+
+            // Espera todos os chunks serem criados
+            await Promise.all(chunkPromises);
+
+            // Verifica se todos os chunks foram criados com sucesso
+            const validChunks = chunkPaths.filter(chunkPath => {
+                if (!fs.existsSync(chunkPath)) {
+                    console.warn(`     ⚠️ Chunk not found: ${path.basename(chunkPath)}`);
+                    return false;
+                }
+
+                const chunkSize = getAudioSize(chunkPath);
+                if (chunkSize === 0) {
+                    console.warn(`     ⚠️ Empty chunk: ${path.basename(chunkPath)}`);
+                    return false;
+                }
+
+                return true;
+            });
+
+            if (validChunks.length === 0) {
+                throw new Error('No valid chunks were created');
+            }
+
+            console.log(`   ✅ Successfully created ${validChunks.length}/${chunksToCreate} valid chunks`);
+            resolve(validChunks);
+
+        } catch (error) {
+            console.error('❌ Error splitting audio into chunks:', error);
+            reject(error);
+        }
+    });
 }
 
-function generateFileTempChunk(baseName: string, suffix: string = ''): string {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8);
-    // ❌ ERRO CORRIGIDO: Adicionado underscore antes do sufixo para melhor formatação
-    return path.join(TEMP_DIR, `${baseName}_${timestamp}_${random}_${suffix}.mp3`);
-}
-
-export function getAudioSize(audioPath: string): number {
-    try {
-        return fs.statSync(audioPath).size;
-    } catch (error) {
-        console.error(`❌ Error getting size of ${audioPath}:`, error);
-        return 0;
-    }
-}
-
-export function getAudioDuration(audioPath: string): Promise<number> {
+// Função auxiliar para obter duração do áudio
+export async function getAudioDuration(audioPath: string): Promise<number> {
     return new Promise((resolve, reject) => {
         ffmpeg.ffprobe(audioPath, (err, metadata) => {
             if (err) {
-                console.error(`❌ Error getting duration of ${audioPath}:`, err);
                 reject(err);
-            } else {
-                const duration = metadata.format.duration || 0;
-                console.log(`⏱️ Audio duration: ${Math.round(duration)}s`);
+                return;
+            }
+
+            const duration = metadata.format.duration;
+            if (typeof duration === 'number') {
                 resolve(duration);
+            } else {
+                reject(new Error('Could not determine audio duration'));
             }
         });
     });
 }
 
-// Função para limpar arquivos temporários
-export function cleanupTempFiles(files: string[]): void {
-    console.log(`🧹 Cleaning up ${files.length} temporary files...`);
+// Função auxiliar para obter tamanho do arquivo
+export function getAudioSize(audioPath: string): number {
+    try {
+        const stats = fs.statSync(audioPath);
+        return stats.size;
+    } catch (error) {
+        console.error('Error getting file size:', error);
+        return 0;
+    }
+}
 
-    files.forEach(file => {
+// Função para limpar arquivos temporários
+export function cleanupTempFiles(tempFiles: string[]): void {
+    tempFiles.forEach(tempFile => {
         try {
-            if (fs.existsSync(file)) {
-                fs.unlinkSync(file);
-                console.log(`   🗑️ Deleted: ${path.basename(file)}`);
+            if (fs.existsSync(tempFile)) {
+                fs.unlinkSync(tempFile);
+                console.log(`   🗑️ Cleaned up: ${path.basename(tempFile)}`);
             }
-        } catch (error: any) {
-            console.warn(`   ⚠️ Could not delete ${file}:`, error.message);
+        } catch (error) {
+            console.warn(`   ⚠️ Could not delete temp file: ${path.basename(tempFile)}`);
+        }
+    });
+
+    // Remove diretório temporário se estiver vazio
+    tempFiles.forEach(tempFile => {
+        const tempDir = path.dirname(tempFile);
+        try {
+            if (fs.existsSync(tempDir) && fs.readdirSync(tempDir).length === 0) {
+                fs.rmdirSync(tempDir);
+                console.log(`   🗑️ Removed temp directory: ${path.basename(tempDir)}`);
+            }
+        } catch (error) {
+            // Ignora erro ao remover diretório
         }
     });
 }
