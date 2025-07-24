@@ -3,7 +3,7 @@ import express from 'express';
 import { processAllVideos } from './utils/processVideos';
 import { transcriptMP3Audio } from './main/transcriptAudio';
 import { generateMarkDownFile } from './services/gptService';
-import { createPage } from './services/wikiService';
+import { createPage, insertAllMarkdownToWiki } from './services/wikiService';
 
 const app = express();
 const port = process.env.PORT || 3030;
@@ -48,18 +48,7 @@ app.post('/generate-md', async (req, res) => {
 
 app.post('/insert-wikijs', async (req, res) => {
     try {
-        const data = {
-            "title": "Minha Página Teste",
-            "path": "/pagina-teste",
-            "content": "# Teste\n\nConteúdo de teste.",
-            "description": "Página de teste",
-            "editor": "markdown",
-            "isPrivate": false,
-            "isPublished": true,
-            "locale": "en",
-            "tags": []
-        }
-        await createPage(data);
+        await insertAllMarkdownToWiki();
         res.send('🎉 All Markdown are inserted on wikijs.');
     } catch (err: any) {
         console.error('❌ Error to insert the file on wiki js:', err);
