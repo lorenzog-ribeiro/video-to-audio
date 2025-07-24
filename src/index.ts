@@ -3,8 +3,7 @@ import express from 'express';
 import { processAllVideos } from './utils/processVideos';
 import { transcriptMP3Audio } from './main/transcriptAudio';
 import { generateMarkDownFile } from './services/gptService';
-import { upsertWikiPage } from './services/wikiService';
-import { testWikiJSConnection } from './utils/testgraphQL';
+import { createPage } from './services/wikiService';
 
 const app = express();
 const port = process.env.PORT || 3030;
@@ -14,7 +13,7 @@ const textDir = path.resolve(__dirname, '../working-paths/transcription');
 const markdownDir = path.resolve(__dirname, '../working-paths/markdown');
 
 app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+    // console.log(`Server is running on http://localhost:${port}`);
 });
 
 app.post('/process-videos', async (req, res) => {
@@ -49,7 +48,18 @@ app.post('/generate-md', async (req, res) => {
 
 app.post('/insert-wikijs', async (req, res) => {
     try {
-        await upsertWikiPage(markdownDir);
+        const data = {
+            "title": "Minha Página Teste",
+            "path": "/pagina-teste",
+            "content": "# Teste\n\nConteúdo de teste.",
+            "description": "Página de teste",
+            "editor": "markdown",
+            "isPrivate": false,
+            "isPublished": true,
+            "locale": "en",
+            "tags": []
+        }
+        await createPage(data);
         res.send('🎉 All Markdown are inserted on wikijs.');
     } catch (err: any) {
         console.error('❌ Error to insert the file on wiki js:', err);
@@ -57,16 +67,15 @@ app.post('/insert-wikijs', async (req, res) => {
     }
 })
 
-
-app.post('/test', async (req, res) => {
-    try {
-        await testWikiJSConnection();
-        res.send('🎉 All testWikiJSConnection are ok on wikijs.');
-    } catch (err: any) {
-        console.error('❌ Error to insert the file on wiki js:', err);
-        res.status(500).json({ error: err.message, stack: err.stack });
-    }
-})
+// app.post('/test', async (req, res) => {
+//     try {
+//         await testWikiJSConnection();
+//         res.send('🎉 All testWikiJSConnection are ok on wikijs.');
+//     } catch (err: any) {
+//         console.error('❌ Error to insert the file on wiki js:', err);
+//         res.status(500).json({ error: err.message, stack: err.stack });
+//     }
+// })
 
 
 

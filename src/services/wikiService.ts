@@ -3,105 +3,128 @@ import fs from 'fs';
 import 'dotenv/config';
 import path from 'path';
 import axios from 'axios';
-import mammoth from 'mammoth';
 
 
-const default_path = process.env.WIKIJS_DEFAULT_PATH;
+const default_path = process.env.WIKIJS_DEFAULT_PATH || '';
 const wiki_base = process.env.WIKIJS_URL;
 const wiki_token = process.env.WIKIJS_API_KEY;
 
-export async function upsertWikiPage(markdownDir: string) {
-    const markdownFiles = fs.readdirSync(markdownDir);
+export async function createPage(pageData: {
+    title: string;
+    path: string;
+    content: string;
+    description?: string;
+    editor?: string;
+    isPrivate?: boolean;
+    isPublished?: boolean;
+    locale?: string;
+    tags?: string[];
+}) {
+    // Debug e validação
+    console.log("🔍 pageData recebido:", pageData);
 
-    for (let mdFiles of markdownFiles) {
-        const filePath = path.join(markdownDir, mdFiles);
-        const content = await readFileContent(filePath);
-
-        const fileNameWithoutExt = path.basename(mdFiles, '.md');
-        const isSummary = mdFiles.includes('_summary');
-
-        let cleanFileName = fileNameWithoutExt
-            .replace(/_summary$/, '')
-            .replace(/_error$/, '')
-            .replace(/[-_]/g, ' ');
-
-        let title = cleanFileName;
-        const titleMatch = content.match(/^#\s+(.+)$/m);
-        if (titleMatch) {
-            title = titleMatch[1];
-        }
-        const payload = {
-            title: title,
-            content: content,
-            content_format: 'markdown',
-            path: `${default_path}`,
-        }
-
-        console.log(payload);
-
-        try {
-            const res = await axios.post(
-                `${wiki_base}/graphql/pages/`, // endpoint de criação
-                payload,
-                {
-                    headers: {
-                        Authorization: `Bearer ${wiki_token}`,
-                        'Content-Type': 'application/json'
-                    }
-                }
-            );
-            console.log('Página criada:', res.data.path);
-            return res.data;
-        } catch (err: any) {
-            // Se a página já existir, você pode capturar o erro 409 e chamar o endpoint de update:
-            if (err.response?.status === 409) {
-                // buscar pageId existente e chamar PUT /api/pages/:id
-                const pageId = err.response.data.details.pageId;
-                return updateWikiPage(pageId, payload);
-            }
-            throw err;
-        }
+    if (!pageData) {
+        throw new Error("pageData é obrigatório");
     }
-}
 
-async function updateWikiPage(pageId: string, payload: {}) {
-    const res = await axios.put(
-        `${wiki_base}/graphql/pages/${pageId}`,
-        payload,
-        { headers: { Authorization: `Bearer ${wiki_token}` } }
-    );
-    console.log('Página atualizada:', res.data.path);
-    return res.data;
-}
+    if (!pageData.title) {
+        throw new Error("pageData.title é obrigatório");
+    }
 
+    if (!pageData.path) {
+        throw new Error("pageData.path é obrigatório");
+    }
 
+    if (!pageData.content) {
+        throw new Error("pageData.content é obrigatório");
+    }
 
-async function readFileContent(filePath: string): Promise<string> {
-    const extension = path.extname(filePath).toLowerCase();
+    const CREATE_PAGE = `
+      mutation CreatePage(
+        $content: String!
+        $description: String!
+        $editor: String!
+        $isPrivate: Boolean!
+        $isPublished: Boolean!
+        $locale: String!
+        $path: String!
+        $tags: [String]!
+        $title: String!
+      ) {
+        pages {
+          create(
+            content: $content
+            description: $description
+            editor: $editor
+            isPrivate: $isPrivate
+            isPublished: $isPublished
+            locale: $locale
+            path: $path
+            tags: $tags
+            title: $title
+          ) {
+            responseResult {
+              succeeded
+              errorCode
+              slug
+              message
+            }
+            page {
+              id
+              title
+              path
+            }
+          }
+        }
+      }
+    `;
+
+    const variables = {
+        title: pageData.title,
+        path: pageData.path,
+        content: pageData.content,
+        description: pageData.description || "",
+        editor: pageData.editor || "markdown",
+        isPrivate: pageData.isPrivate || false,
+        isPublished: pageData.isPublished !== false,
+        locale: pageData.locale || "en",
+        tags: pageData.tags || []
+    };
+
+    console.log("🔍 Variables criadas:", variables);
+
+    const body = {
+        query: CREATE_PAGE,
+        variables: variables
+    };
+
+    console.log("▶️ Enviando body:", JSON.stringify(body, null, 2));
 
     try {
-        switch (extension) {
-            case '.md':
-                const mdContent = fs.readFileSync(filePath, 'utf-8');
-                // Clean up markdown content
-                return mdContent
-                    .replace(/```[\s\S]*?```/g, '[CODE BLOCK]') // Replace code blocks
-                    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Remove markdown links
-                    .trim();
+        const resp = await axios({
+            method: 'POST',
+            url: wiki_base!,
+            data: body,
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${wiki_token}`
+            },
+            maxRedirects: 0 // Impede redirecionamentos
+        });
 
-            case '.docx':
-                const result = await mammoth.extractRawText({ path: filePath });
-                // Clean up docx content
-                return result.value
-                    .replace(/\r\n/g, '\n') // Normalize line endings
-                    .replace(/\t/g, '  ') // Replace tabs with spaces
-                    .trim();
+        console.log("✅ Resposta completa:", resp.data);
 
-            default:
-                throw new Error(`Unsupported file type: ${extension}`);
+        if (resp.data.data?.pages?.create?.responseResult?.succeeded) {
+            console.log("🎉 Página criada com sucesso!");
+            console.log("📄 Página:", resp.data.data.pages.create.page);
+            return resp.data.data.pages.create;
+        } else {
+            console.error("❌ Erro ao criar página:", resp.data.data?.pages?.create?.responseResult?.message);
+            throw new Error(resp.data.data?.pages?.create?.responseResult?.message || "Erro desconhecido");
         }
-    } catch (error: any) {
-        console.error(`Error reading file ${filePath}:`, error.message);
-        throw error;
+
+    } catch (err: any) {
+        console.error("❌ Erro na requisição:", err.response?.status, err.response?.data || err.message);
+        throw err;
     }
 }
