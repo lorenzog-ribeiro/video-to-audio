@@ -189,9 +189,7 @@ export async function processAllMarkdownFiles(markdownDir?: string): Promise<{ s
                 }
 
                 const { title, description, tags, cleanContent } = extractMarkdownMetadata(rawContent);
-
                 const finalTitle = title || path.basename(file, '.md').replace(/_/g, ' ');
-
                 const wikiPath = generateWikiPath(finalTitle, default_path);
 
                 await createPage({
@@ -205,8 +203,6 @@ export async function processAllMarkdownFiles(markdownDir?: string): Promise<{ s
                     locale: 'en',
                     tags: tags
                 });
-
-                console.log(`   ✅ Página criada com sucesso!\n`);
                 results.successful++;
 
                 if (i < files.length - 1) {
@@ -221,10 +217,6 @@ export async function processAllMarkdownFiles(markdownDir?: string): Promise<{ s
                 });
             }
         }
-
-        console.log(`✅ Páginas criadas com sucesso: ${results.successful}/${files.length}`);
-        console.log(`❌ Falhas: ${results.failed}/${files.length}`);
-
     } catch (error: any) {
         throw `❌ Erro fatal no processamento: ${error.message}`;
     }

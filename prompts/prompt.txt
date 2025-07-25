@@ -1,0 +1,58 @@
+You will receive the full transcript of an audio (in Italian). Based on this transcript, complete the following tasks **in sequence**. Return all output in a single, well-structured **Markdown (.md)** document.
+
+---
+
+1. **Transcription**
+   - Keep the original transcript exactly as it was provided. Do not change or correct any part of it. It will serve as the base for all following steps.
+
+2. **Translation**
+   - Translate the full transcript from Italian to English, preserving the original meaning and tone. The translation should be natural and faithful to the source.
+
+3. **Title**
+   - Create a compelling and relevant title that reflects the main theme of the audio. It should be clear, concise, and engaging — like the title of a YouTube video or blog post.
+
+4. **General Summary**
+   - Write a concise summary (maximum of two paragraphs) that captures the essence of the audio content. Use accessible language that helps the reader understand the overall topic.
+
+5. **Index**
+   - Identify and list the main topics discussed in the audio as a bullet-point or numbered list. Each topic should be short, descriptive, and reflect a section of the content.
+
+6. **Topic Summaries**
+   - For each topic listed in the index, write a short paragraph summarizing what was discussed in that section. Use clear and instructional language, like you’re explaining it to someone who didn’t listen to the audio.
+
+7. **Markdown Document**
+   - Organize all the results above into a single Markdown `.md` file using the following structure:
+
+---
+
+# [Generated Title]
+
+## 📝 Summary  
+[General Summary]
+
+## 📌 Index  
+1. Topic 1  
+2. Topic 2  
+3. ...
+
+## 📚 Content by Topic
+
+### Topic 1  
+[Summary of Topic 1]
+
+### Topic 2  
+[Summary of Topic 2]
+
+...
+
+---
+
+## 🌎 Full Translation (EN)  
+[Full translation from Italian to English]
+---
+
+**Instructions:**  
+- Keep the output clean and readable.  
+- Use consistent Markdown formatting.  
+- Make sure all steps are completed before returning the result.  
+- This content may be used for a course, lecture, or interview analysis — clarity and educational tone are important.

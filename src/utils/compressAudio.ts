@@ -32,11 +32,7 @@ export async function splitAudioIntoChunks(
                 chunksToCreate = Math.ceil(fileSize / maxFileSize);
             }
 
-            // Calcula a duração de cada chunk
             const chunkDuration = totalDuration / chunksToCreate;
-
-            console.log(`   📐 Total duration: ${Math.round(totalDuration)}s`);
-            console.log(`   🔪 Creating ${chunksToCreate} chunks of ~${Math.round(chunkDuration)}s each`);
 
             const chunkPromises: Promise<string>[] = [];
             const chunkPaths: string[] = [];
@@ -53,7 +49,6 @@ export async function splitAudioIntoChunks(
                         .output(chunkPath)
                         .audioCodec('copy') // Mantém o codec original para ser mais rápido
                         .on('end', () => {
-                            console.log(`     ✅ Chunk ${i + 1}/${chunksToCreate} created`);
                             resolveChunk(chunkPath);
                         })
                         .on('error', (err) => {
@@ -61,7 +56,6 @@ export async function splitAudioIntoChunks(
                             rejectChunk(err);
                         });
 
-                    // Para o último chunk, não define duração (pega até o final)
                     if (i === chunksToCreate - 1) {
                         command = ffmpeg(audioPath)
                             .seekInput(startTime)
@@ -83,10 +77,8 @@ export async function splitAudioIntoChunks(
                 chunkPromises.push(chunkPromise);
             }
 
-            // Espera todos os chunks serem criados
             await Promise.all(chunkPromises);
 
-            // Verifica se todos os chunks foram criados com sucesso
             const validChunks = chunkPaths.filter(chunkPath => {
                 if (!fs.existsSync(chunkPath)) {
                     console.warn(`     ⚠️ Chunk not found: ${path.basename(chunkPath)}`);
@@ -105,10 +97,7 @@ export async function splitAudioIntoChunks(
             if (validChunks.length === 0) {
                 throw new Error('No valid chunks were created');
             }
-
-            console.log(`   ✅ Successfully created ${validChunks.length}/${chunksToCreate} valid chunks`);
             resolve(validChunks);
-
         } catch (error) {
             console.error('❌ Error splitting audio into chunks:', error);
             reject(error);
