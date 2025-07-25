@@ -5,8 +5,8 @@ import ffm from 'fluent-ffmpeg';
 
 ffm.setFfmpegPath('C:/ffmpeg/bin/ffmpeg.exe');
 
-const videosDir = path.resolve(__dirname, '../working-paths/videos');
-const audiosDir = path.resolve(__dirname, '../working-paths/audios');
+const videosDir = path.resolve(__dirname, '../../working-paths/videos');
+const audiosDir = path.resolve(__dirname, '../../working-paths/audios');
 
 
 function extractAudioFromVideo(videoFilePath: string, outputFilePath: string): Promise<void> {

@@ -107,12 +107,8 @@ async function validateAudioFile(audioPath: string): Promise<boolean> {
         if (duration === 0 || isNaN(duration)) {
             throw new Error('Invalid audio duration or corrupted file structure');
         }
-
-        console.log(`   ✅ File validation passed: ${Math.round(size / 1024 / 1024 * 100) / 100}MB, ${Math.round(duration)}s`);
         return true;
-
     } catch (error: any) {
-        console.log(`   ❌ File validation failed: ${error.message}`);
         return false;
     }
 }
@@ -209,34 +205,22 @@ export async function transcriptMP3Audio(audioDir: string) {
         });
 
         if (audioFiles.length === 0) {
-            console.log('📁 No audio files found in directory');
             return;
         }
-
-        console.log(`📊 Found ${audioFiles.length} audio files to process`);
 
         for (const audio of audioFiles) {
             const audioPath = path.join(audioDir, audio);
 
-            console.log(`\n🎧 Processing: ${audio}`);
-
-            // Validação: Verifica se arquivo está corrompido ANTES de processar
-            console.log(`   🔍 Validating audio file...`);
             const isValid = await validateAudioFile(audioPath);
 
             if (!isValid) {
-                console.log(`   ❌ File is corrupted or invalid, moving to error folder...`);
                 moveToErrorFolder(audioPath, new Error('File validation failed - corrupted or invalid audio file'));
                 errorCount++;
                 continue;
             }
 
             const audioSize = getAudioSize(audioPath);
-            const audioSizeMB = Math.round(audioSize / 1024 / 1024 * 100) / 100;
             const audioDuration = await getAudioDuration(audioPath);
-
-            console.log(`   📊 File size: ${audioSizeMB}MB`);
-            console.log(`   ⏱️ Audio duration: ${Math.round(audioDuration)}s (${Math.round(audioDuration / 60)}min)`);
 
             let tempFiles: string[] = [];
 
