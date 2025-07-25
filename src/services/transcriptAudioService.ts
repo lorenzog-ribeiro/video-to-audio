@@ -10,9 +10,10 @@ const openai = new OpenAI({ apiKey: api_key });
 const transcriptedDir = path.resolve(__dirname, '../../working-paths/transcripted');
 const outputDir = path.resolve(__dirname, '../../working-paths/transcription');
 const errorDir = path.resolve(__dirname, '../../working-paths/error');
-const maxFileSize = 25 * 1024 * 1024; // 25MB
+
+const maxFileSize = 25 * 1024 * 1024;
 const maxDurationSeconds = 1400;
-// Garante que os diretórios existem
+
 [outputDir, errorDir].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -24,7 +25,6 @@ function moveToTranscriptedFolder(audioPath: string, transcriptionPath: string):
         const fileName = path.basename(audioPath);
         const transcriptedPath = path.join(transcriptedDir, fileName);
 
-        // Se já existe arquivo com mesmo nome, adiciona timestamp
         let finalTranscriptedPath = transcriptedPath;
         if (fs.existsSync(transcriptedPath)) {
             const ext = path.extname(fileName);
@@ -33,10 +33,8 @@ function moveToTranscriptedFolder(audioPath: string, transcriptionPath: string):
             finalTranscriptedPath = path.join(transcriptedDir, `${nameWithoutExt}_${timestamp}${ext}`);
         }
 
-        // Move o arquivo original
         fs.renameSync(audioPath, finalTranscriptedPath);
 
-        // Cria um arquivo de informações sobre a transcrição
         const infoPath = path.join(transcriptedDir, `${path.basename(finalTranscriptedPath, path.extname(finalTranscriptedPath))}_info.txt`);
         const infoContent = `Original File: ${fileName}
 Original Path: ${audioPath}
@@ -47,9 +45,6 @@ File Size: ${getAudioSize(finalTranscriptedPath)} bytes
 `;
 
         fs.writeFileSync(infoPath, infoContent, 'utf-8');
-
-        console.log(`✅ Moved successfully transcribed file: ${path.basename(finalTranscriptedPath)}`);
-        console.log(`📋 Info file created: ${path.basename(infoPath)}`);
 
     } catch (moveError: any) {
         console.error(`❌ Error moving file to transcripted folder: ${moveError.message}`);
@@ -124,14 +119,9 @@ async function validateAudioFile(audioPath: string): Promise<boolean> {
 
 async function processAudioChunk(chunkPath: string, chunkIndex: number = 1, totalChunks: number = 1): Promise<string> {
     try {
-        console.log(`     📝 Transcribing chunk ${chunkIndex}/${totalChunks}: ${path.basename(chunkPath)}`);
-
         if (!fs.existsSync(chunkPath)) {
             throw new Error(`Chunk file not found: ${chunkPath}`);
         }
-
-        const chunkSize = getAudioSize(chunkPath);
-        console.log(`     📊 Chunk size: ${Math.round(chunkSize / 1024 / 1024 * 100) / 100}MB`);
 
         const transcription = await openai.audio.transcriptions.create({
             file: fs.createReadStream(chunkPath),
@@ -146,10 +136,7 @@ async function processAudioChunk(chunkPath: string, chunkIndex: number = 1, tota
             console.warn(`     ⚠️ Empty transcription for chunk ${chunkIndex}`);
             return '';
         }
-
-        console.log(`     ✅ Chunk ${chunkIndex}/${totalChunks} transcribed: ${transcribedText.length} characters`);
         return transcribedText;
-
     } catch (error: any) {
         console.error(`     ❌ Error transcribing chunk ${chunkIndex}:`, error.message);
 
@@ -173,7 +160,6 @@ async function processAudioChunk(chunkPath: string, chunkIndex: number = 1, tota
         if (isCorruptionError) {
             throw new Error(`Corrupted audio chunk detected: ${error.message}`);
         }
-
         return '';
     }
 }
@@ -198,12 +184,10 @@ ${formattedText}
 `;
 
         fs.writeFileSync(outputPath, markdownContent, "utf-8");
-        console.log(`     📝 Transcription saved: ${outputPath}`);
         return outputPath;
 
     } catch (error) {
-        console.error(`❌ Error saving transcription for ${audioFileName}:`, error);
-        throw error;
+        throw `❌ Error saving transcription for ${audioFileName}, ${error}:`;
     }
 }
 
@@ -257,42 +241,25 @@ export async function transcriptMP3Audio(audioDir: string) {
             let tempFiles: string[] = [];
 
             try {
-                // 🆕 NOVA LÓGICA: Verifica TANTO tamanho quanto duração
                 const needsSplitting = audioSize > maxFileSize || audioDuration > maxDurationSeconds;
 
                 if (needsSplitting) {
-                    const reason = audioSize > maxFileSize ?
-                        `file too large (${audioSizeMB}MB > 25MB)` :
-                        `duration too long (${Math.round(audioDuration)}s > ${maxDurationSeconds}s)`;
 
-                    console.log(`   ⚠️ ${reason}, splitting into chunks...`);
-
-                    // Calcula o número de chunks baseado na duração
                     const chunksNeededByDuration = Math.ceil(audioDuration / maxDurationSeconds);
                     const chunksNeededBySize = Math.ceil(audioSize / maxFileSize);
                     const chunksNeeded = Math.max(chunksNeededByDuration, chunksNeededBySize);
-
-                    console.log(`   📐 Splitting into ${chunksNeeded} chunks to meet both size and duration limits`);
 
                     const chunks = await splitAudioIntoChunks(audioPath, chunksNeeded);
                     tempFiles = [...chunks];
                     allTempFiles.push(...chunks);
 
-                    console.log(`   🎯 Transcribing ${chunks.length} chunks...`);
-
-                    // Valida cada chunk antes de processar
                     const validChunks = [];
                     for (let i = 0; i < chunks.length; i++) {
                         const chunkDuration = await getAudioDuration(chunks[i]);
-                        const chunkSize = getAudioSize(chunks[i]);
-
-                        console.log(`     📊 Chunk ${i + 1}: ${Math.round(chunkDuration)}s, ${Math.round(chunkSize / 1024 / 1024 * 100) / 100}MB`);
 
                         if (chunkDuration > maxDurationSeconds) {
-                            console.warn(`     ⚠️ Chunk ${i + 1} still too long (${Math.round(chunkDuration)}s), skipping`);
                             continue;
                         }
-
                         validChunks.push({ path: chunks[i], index: i + 1 });
                     }
 
@@ -313,34 +280,26 @@ export async function transcriptMP3Audio(audioDir: string) {
                     if (combinedTranscription.trim().length > 0) {
                         const transcriptionPath = await saveTranscription(audio, combinedTranscription);
                         processedCount++;
-                        console.log(`   ✅ Successfully processed: ${audio}`);
                         moveToTranscriptedFolder(audioPath, transcriptionPath);
                     } else {
-                        console.warn(`   ⚠️ No valid transcription generated for ${audio}`);
                         moveToErrorFolder(audioPath, new Error('No valid transcription generated - all chunks failed or were too long'));
                         errorCount++;
                     }
 
                 } else {
-                    console.log(`   ✅ File size and duration OK, processing directly...`);
                     const transcription = await processAudioChunk(audioPath, 1, 1);
 
                     if (transcription && transcription.trim().length > 0) {
                         const transcriptionPath = await saveTranscription(audio, transcription);
                         processedCount++;
-                        console.log(`   ✅ Successfully processed: ${audio}`);
                         moveToTranscriptedFolder(audioPath, transcriptionPath);
                     } else {
-                        console.warn(`   ⚠️ No valid transcription generated for ${audio}`);
                         moveToErrorFolder(audioPath, new Error('No valid transcription generated - possibly corrupted audio content'));
                         errorCount++;
                     }
                 }
 
             } catch (error: any) {
-                console.error(`   ❌ Error processing ${audio}:`, error.message);
-
-                // Detecta se é erro de duração muito longa
                 const durationError = error.message.includes('longer than') && error.message.includes('maximum');
 
                 const corruptionIndicators = [
@@ -354,10 +313,7 @@ export async function transcriptMP3Audio(audioDir: string) {
                 ) || durationError;
 
                 if (isCorruptionError || error.response?.status === 400) {
-                    console.log(`   🗂️ Moving to error folder due to: ${durationError ? 'duration limit exceeded' : 'corruption detected'}`);
                     moveToErrorFolder(audioPath, error);
-                } else {
-                    console.error(`   💥 Unexpected error, keeping file in place for manual review`);
                 }
 
                 errorCount++;
@@ -368,70 +324,11 @@ export async function transcriptMP3Audio(audioDir: string) {
             }
         }
 
-        // Relatório final
-        console.log("\n" + "=".repeat(50));
-        console.log("📊 TRANSCRIPTION SUMMARY");
-        console.log("=".repeat(50));
-        console.log(`✅ Successfully processed: ${processedCount}/${audioFiles.length}`);
-        console.log(`❌ Moved to error folder: ${errorCount}/${audioFiles.length}`);
-        console.log(`📁 Transcriptions saved to: ${outputDir}`);
-        console.log(`📦 Original files moved to: ${transcriptedDir}`);
-        console.log(`🗂️ Error files moved to: ${errorDir}`);
-
-        if (errorCount > 0) {
-            console.log(`\n⚠️ ${errorCount} files had issues and were moved to the error folder.`);
-            console.log(`   Check the error logs in ${errorDir} for details.`);
-        }
-
     } catch (error) {
-        console.error('❌ Error in transcription process:', error);
         throw error;
     } finally {
         if (allTempFiles.length > 0) {
-            console.log('\n🧹 Final cleanup...');
             cleanupTempFiles(allTempFiles);
         }
-    }
-}
-
-// 🆕 NOVA FUNÇÃO: Lista arquivos na pasta de erro
-export function listErrorFiles(): void {
-    try {
-        if (!fs.existsSync(errorDir)) {
-            console.log('📁 Error folder does not exist yet');
-            return;
-        }
-
-        const errorFiles = fs.readdirSync(errorDir);
-        const audioFiles = errorFiles.filter(file =>
-            ['.mp3', '.wav', '.m4a', '.ogg', '.flac'].includes(path.extname(file).toLowerCase())
-        );
-        const logFiles = errorFiles.filter(file => file.endsWith('.log'));
-
-        console.log('\n' + '='.repeat(40));
-        console.log('📋 ERROR FOLDER CONTENTS');
-        console.log('='.repeat(40));
-        console.log(`📁 Location: ${errorDir}`);
-        console.log(`🎵 Audio files: ${audioFiles.length}`);
-        console.log(`📄 Log files: ${logFiles.length}`);
-
-        if (audioFiles.length > 0) {
-            console.log('\n🎵 Corrupted audio files:');
-            audioFiles.forEach(file => {
-                const filePath = path.join(errorDir, file);
-                const size = fs.existsSync(filePath) ? getAudioSize(filePath) : 0;
-                console.log(`   - ${file} (${Math.round(size / 1024 / 1024 * 100) / 100}MB)`);
-            });
-        }
-
-        if (logFiles.length > 0) {
-            console.log('\n📄 Error log files:');
-            logFiles.forEach(file => {
-                console.log(`   - ${file}`);
-            });
-        }
-
-    } catch (error) {
-        console.error('❌ Error listing error files:', error);
     }
 }
